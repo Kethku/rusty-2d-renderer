@@ -16,8 +16,9 @@ use crate::{
 pub struct SpriteState<A: RustEmbed> {
     buffer: Buffer,
     atlas_texture: Texture,
+    bind_group_layout: BindGroupLayout,
     bind_group: BindGroup,
-    render_pipeline: RenderPipeline,
+    render_pipeline: Option<RenderPipeline>,
 
     image_lookup: HashMap<String, AllocId>,
     atlas_allocator: AtlasAllocator,
@@ -86,15 +87,7 @@ impl<A: RustEmbed> SpriteState<A> {
 }
 
 impl<A: RustEmbed> Drawable for SpriteState<A> {
-    fn new(
-        Resources {
-            device,
-            shader,
-            swapchain_format,
-            universal_bind_group_layout,
-            ..
-        }: &Resources,
-    ) -> Self {
+    fn new(Resources { device, .. }: &Resources) -> Self {
         let buffer = device.create_buffer(&BufferDescriptor {
             label: Some("Sprite buffer"),
             size: std::mem::size_of::<InstancedSprite>() as u64 * 100000,
@@ -160,16 +153,39 @@ impl<A: RustEmbed> Drawable for SpriteState<A> {
             ],
         });
 
+        Self {
+            buffer,
+            atlas_texture,
+            bind_group_layout,
+            bind_group,
+            render_pipeline: None,
+
+            image_lookup: HashMap::new(),
+            atlas_allocator: AtlasAllocator::new(size2(ATLAS_SIZE.x as i32, ATLAS_SIZE.y as i32)),
+            _assets: PhantomData,
+        }
+    }
+
+    fn surface_updated(
+        &mut self,
+        Resources {
+            device,
+            shader,
+            surface_resources_manager,
+            universal_bind_group_layout,
+            ..
+        }: &Resources,
+    ) {
         let render_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Sprite Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout, &universal_bind_group_layout],
+            bind_group_layouts: &[&self.bind_group_layout, &universal_bind_group_layout],
             push_constant_ranges: &[PushConstantRange {
                 stages: ShaderStages::all(),
                 range: 0..std::mem::size_of::<ShaderConstants>() as u32,
             }],
         });
 
-        let render_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+        self.render_pipeline = Some(device.create_render_pipeline(&RenderPipelineDescriptor {
             label: Some("Sprite Pipeline"),
             layout: Some(&render_pipeline_layout),
             vertex: VertexState {
@@ -181,7 +197,7 @@ impl<A: RustEmbed> Drawable for SpriteState<A> {
                 module: &shader,
                 entry_point: "sprite::sprite_fragment",
                 targets: &[Some(ColorTargetState {
-                    format: *swapchain_format,
+                    format: surface_resources_manager.format(),
                     blend: Some(BlendState::ALPHA_BLENDING),
                     write_mask: ColorWrites::ALL,
                 })],
@@ -201,18 +217,7 @@ impl<A: RustEmbed> Drawable for SpriteState<A> {
                 ..Default::default()
             },
             multiview: None,
-        });
-
-        Self {
-            buffer,
-            atlas_texture,
-            bind_group,
-            render_pipeline,
-
-            image_lookup: HashMap::new(),
-            atlas_allocator: AtlasAllocator::new(size2(ATLAS_SIZE.x as i32, ATLAS_SIZE.y as i32)),
-            _assets: PhantomData,
-        }
+        }));
     }
 
     fn draw<'b, 'a: 'b>(
@@ -229,7 +234,7 @@ impl<A: RustEmbed> Drawable for SpriteState<A> {
             .map(|sprite| self.upload_sprite(queue, sprite))
             .collect();
 
-        render_pass.set_pipeline(&self.render_pipeline);
+        render_pass.set_pipeline(self.render_pipeline.as_ref().unwrap());
         render_pass.set_push_constants(ShaderStages::all(), 0, bytemuck::cast_slice(&[constants]));
 
         queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&sprites[..]));

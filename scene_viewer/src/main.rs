@@ -2,7 +2,7 @@ use std::{fs::File, io::Read, path::Path, sync::Arc};
 
 use futures::executor::block_on;
 
-use glam::{vec2, vec4, Vec4};
+use glam::{vec2, vec4};
 use notify::{recommended_watcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
 use rust_embed::RustEmbed;
@@ -13,7 +13,7 @@ use winit::{
     window::WindowBuilder,
 };
 
-use bedrock::{Quad, Renderer, Scene, Sprite};
+use bedrock::{Quad, Renderer, Scene};
 
 #[derive(RustEmbed)]
 #[folder = "assets"]
@@ -50,13 +50,15 @@ fn main() {
         .watch(&scene_path, RecursiveMode::NonRecursive)
         .unwrap();
 
-    let window = WindowBuilder::new().build(&event_loop).unwrap();
-    let mut renderer = block_on(Renderer::new(&window)).with_default_drawables::<Assets>();
+    let window = Arc::new(WindowBuilder::new().build(&event_loop).unwrap());
+    let mut renderer = block_on(Renderer::new(window.clone())).with_default_drawables::<Assets>();
     let mut mouse_pos: PhysicalPosition<f64> = Default::default();
 
     event_loop
         .run(|event, target| {
-            match event {
+            renderer.handle_event(&event);
+
+            match dbg!(event) {
                 Event::NewEvents(_) => {
                     let mut scene = scene.read().clone();
                     scene.add_quad(
@@ -85,8 +87,6 @@ fn main() {
                 }
                 _ => {}
             };
-
-            renderer.handle_event(&window, &event);
         })
         .expect("Could not run event loop");
 }

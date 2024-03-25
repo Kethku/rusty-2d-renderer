@@ -10,20 +10,13 @@ use crate::{
 
 pub struct QuadState {
     buffer: Buffer,
+    bind_group_layout: BindGroupLayout,
     bind_group: BindGroup,
-    render_pipeline: RenderPipeline,
+    render_pipeline: Option<RenderPipeline>,
 }
 
 impl Drawable for QuadState {
-    fn new(
-        Resources {
-            device,
-            universal_bind_group_layout,
-            shader,
-            swapchain_format,
-            ..
-        }: &Resources,
-    ) -> Self {
+    fn new(Resources { device, .. }: &Resources) -> Self {
         let buffer = device.create_buffer(&BufferDescriptor {
             label: Some("Quad buffer"),
             size: std::mem::size_of::<InstancedQuad>() as u64 * 100000,
@@ -54,28 +47,46 @@ impl Drawable for QuadState {
             }],
         });
 
+        Self {
+            buffer,
+            bind_group_layout,
+            bind_group,
+            render_pipeline: None,
+        }
+    }
+
+    fn surface_updated(
+        &mut self,
+        Resources {
+            device,
+            shader,
+            universal_bind_group_layout,
+            surface_resources_manager,
+            ..
+        }: &Resources,
+    ) {
         let render_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Quad Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout, &universal_bind_group_layout],
+            bind_group_layouts: &[&self.bind_group_layout, &universal_bind_group_layout],
             push_constant_ranges: &[PushConstantRange {
                 stages: ShaderStages::all(),
                 range: 0..std::mem::size_of::<ShaderConstants>() as u32,
             }],
         });
 
-        let render_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+        self.render_pipeline = Some(device.create_render_pipeline(&RenderPipelineDescriptor {
             label: Some("Quad Pipeline"),
             layout: Some(&render_pipeline_layout),
             vertex: VertexState {
-                module: &shader,
+                module: shader,
                 entry_point: "quad::vertex",
                 buffers: &[],
             },
             fragment: Some(FragmentState {
-                module: &shader,
+                module: shader,
                 entry_point: "quad::fragment",
                 targets: &[Some(ColorTargetState {
-                    format: *swapchain_format,
+                    format: surface_resources_manager.format(),
                     blend: Some(BlendState::ALPHA_BLENDING),
                     write_mask: ColorWrites::ALL,
                 })],
@@ -95,13 +106,7 @@ impl Drawable for QuadState {
                 ..Default::default()
             },
             multiview: None,
-        });
-
-        Self {
-            buffer,
-            bind_group,
-            render_pipeline,
-        }
+        }));
     }
 
     fn draw<'b, 'a: 'b>(
@@ -130,7 +135,7 @@ impl Drawable for QuadState {
 
         quads.extend(layer.quads.iter().map(|quad| quad.to_instanced()));
 
-        render_pass.set_pipeline(&self.render_pipeline); // 2.
+        render_pass.set_pipeline(self.render_pipeline.as_ref().unwrap()); // 2.
         render_pass.set_push_constants(ShaderStages::all(), 0, bytemuck::cast_slice(&[constants]));
 
         let quad_data: &[u8] = bytemuck::cast_slice(&quads[..]);

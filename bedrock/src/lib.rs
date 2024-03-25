@@ -7,6 +7,7 @@ mod resources;
 mod scene;
 mod shaper;
 mod sprite;
+mod surface_wrapper;
 
 use glam::{vec2, Vec2};
 use rust_embed::*;

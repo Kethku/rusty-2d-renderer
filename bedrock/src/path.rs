@@ -18,18 +18,11 @@ use crate::{
 pub struct PathState {
     vertex_buffer: Buffer,
     index_buffer: Buffer,
-    render_pipeline: RenderPipeline,
+    render_pipeline: Option<RenderPipeline>,
 }
 
 impl Drawable for PathState {
-    fn new(
-        Resources {
-            device,
-            shader,
-            swapchain_format,
-            ..
-        }: &Resources,
-    ) -> Self {
+    fn new(Resources { device, .. }: &Resources) -> Self {
         let vertex_buffer = device.create_buffer(&BufferDescriptor {
             label: Some("Path Vertex Buffer"),
             size: std::mem::size_of::<PathVertex>() as u64 * 100000,
@@ -44,7 +37,23 @@ impl Drawable for PathState {
             mapped_at_creation: false,
         });
 
-        let render_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+        Self {
+            vertex_buffer,
+            index_buffer,
+            render_pipeline: None,
+        }
+    }
+
+    fn surface_updated(
+        &mut self,
+        Resources {
+            device,
+            shader,
+            surface_resources_manager,
+            ..
+        }: &Resources,
+    ) {
+        self.render_pipeline = Some(device.create_render_pipeline(&RenderPipelineDescriptor {
             label: Some("Path render pipeline"),
             layout: Some(&device.create_pipeline_layout(&PipelineLayoutDescriptor {
                 label: Some("Path Pipeline layout"),
@@ -67,7 +76,7 @@ impl Drawable for PathState {
                 module: &shader,
                 entry_point: "path::path_fragment",
                 targets: &[Some(ColorTargetState {
-                    format: *swapchain_format,
+                    format: surface_resources_manager.format(),
                     blend: Some(BlendState::ALPHA_BLENDING),
                     write_mask: ColorWrites::ALL,
                 })],
@@ -87,13 +96,7 @@ impl Drawable for PathState {
                 ..Default::default()
             },
             multiview: None,
-        });
-
-        Self {
-            vertex_buffer,
-            index_buffer,
-            render_pipeline,
-        }
+        }));
     }
 
     fn draw<'b, 'a: 'b>(
@@ -165,7 +168,7 @@ impl Drawable for PathState {
                     .expect("Could not tesselate path");
             }
 
-            render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_pipeline(self.render_pipeline.as_ref().unwrap());
             render_pass.set_push_constants(
                 ShaderStages::all(),
                 0,

@@ -22,8 +22,9 @@ use crate::{
 pub struct GlyphState {
     buffer: Buffer,
     atlas_texture: Texture,
+    bind_group_layout: BindGroupLayout,
     bind_group: BindGroup,
-    render_pipeline: RenderPipeline,
+    render_pipeline: Option<RenderPipeline>,
 
     scale_context: ScaleContext,
     shaping_context: ShapeContext,
@@ -183,15 +184,7 @@ impl GlyphState {
 }
 
 impl Drawable for GlyphState {
-    fn new(
-        Resources {
-            device,
-            shader,
-            swapchain_format,
-            universal_bind_group_layout,
-            ..
-        }: &Resources,
-    ) -> Self {
+    fn new(Resources { device, .. }: &Resources) -> Self {
         let buffer = device.create_buffer(&BufferDescriptor {
             label: Some("Glyph buffer"),
             size: std::mem::size_of::<InstancedGlyph>() as u64 * 100000,
@@ -257,16 +250,41 @@ impl Drawable for GlyphState {
             ],
         });
 
+        Self {
+            buffer,
+            atlas_texture,
+            bind_group_layout,
+            bind_group,
+            render_pipeline: None,
+
+            scale_context: ScaleContext::new(),
+            shaping_context: ShapeContext::new(),
+            atlas_allocator: AtlasAllocator::new(size2(ATLAS_SIZE.x as i32, ATLAS_SIZE.y as i32)),
+            glyph_lookup: HashMap::new(),
+            shaped_text_lookup: HashMap::new(),
+        }
+    }
+
+    fn surface_updated(
+        &mut self,
+        Resources {
+            device,
+            shader,
+            surface_resources_manager,
+            universal_bind_group_layout,
+            ..
+        }: &Resources,
+    ) {
         let render_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Glyph Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout, &universal_bind_group_layout],
+            bind_group_layouts: &[&self.bind_group_layout, &universal_bind_group_layout],
             push_constant_ranges: &[PushConstantRange {
                 stages: ShaderStages::all(),
                 range: 0..std::mem::size_of::<ShaderConstants>() as u32,
             }],
         });
 
-        let render_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+        self.render_pipeline = Some(device.create_render_pipeline(&RenderPipelineDescriptor {
             label: Some("Glyph Pipeline"),
             layout: Some(&render_pipeline_layout),
             vertex: VertexState {
@@ -278,7 +296,7 @@ impl Drawable for GlyphState {
                 module: &shader,
                 entry_point: "glyph::glyph_fragment",
                 targets: &[Some(ColorTargetState {
-                    format: *swapchain_format,
+                    format: surface_resources_manager.format(),
                     blend: Some(BlendState::ALPHA_BLENDING),
                     write_mask: ColorWrites::ALL,
                 })],
@@ -298,20 +316,7 @@ impl Drawable for GlyphState {
                 ..Default::default()
             },
             multiview: None,
-        });
-
-        Self {
-            buffer,
-            atlas_texture,
-            bind_group,
-            render_pipeline,
-
-            scale_context: ScaleContext::new(),
-            shaping_context: ShapeContext::new(),
-            atlas_allocator: AtlasAllocator::new(size2(ATLAS_SIZE.x as i32, ATLAS_SIZE.y as i32)),
-            glyph_lookup: HashMap::new(),
-            shaped_text_lookup: HashMap::new(),
-        }
+        }));
     }
 
     fn draw<'b, 'a: 'b>(
@@ -335,7 +340,7 @@ impl Drawable for GlyphState {
             .flatten()
             .collect();
 
-        render_pass.set_pipeline(&self.render_pipeline);
+        render_pass.set_pipeline(self.render_pipeline.as_ref().unwrap());
         render_pass.set_push_constants(ShaderStages::all(), 0, bytemuck::cast_slice(&[constants]));
 
         queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&glyphs[..]));
